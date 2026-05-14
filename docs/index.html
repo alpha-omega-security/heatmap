@@ -14,8 +14,16 @@
     #info  { position: static; }
     #filters { position: static; }
     #legend { bottom: 12px; left: 12px; font-size: 12px; line-height: 1.5; padding: 10px 14px; }
+    #search {
+      position: absolute; top: 12px; right: 12px; z-index: 5;
+      padding: 6px 10px; border-radius: 6px;
+      border: 1px solid #475569; background: rgba(15, 23, 42, 0.85); color: #e2e8f0;
+      font-family: inherit; font-size: 12px; width: 320px;
+    }
+    #search::placeholder { color: #64748b; }
+    #search:focus { outline: none; border-color: #93c5fd; }
     #detail {
-      top: 12px; right: 12px; min-width: 240px; max-width: 320px;
+      top: 52px; right: 12px; min-width: 240px; max-width: 320px;
       display: none;
     }
     #detail h2 { margin: 0 0 8px 0; font-size: 15px; }
@@ -61,6 +69,7 @@
     </div>
     <div id="filters" class="panel"></div>
   </div>
+  <input id="search" type="search" placeholder="search owner or package (e.g. Microsoft, ASF, log4j, andrew)…">
   <div id="detail" class="panel"></div>
   <div id="tooltip"></div>
 
@@ -77947,6 +77956,21 @@
       'cncf', 'openjs-foundation', 'nodejs', 'psf', 'pallets', 'django', 'numfocus',
       'rust-lang', 'rails', 'ruby',
     ]);
+    // Aliases / abbreviations for the owner search box.
+    // TODO: expand from local data — count owner_record.kind=organization
+    // owners with N+ packages and seed this map automatically.
+    const OWNER_ALIASES = {
+      'asf':    ['apache'],
+      'apache': ['apache'],
+      'ef':     ['eclipse', 'eclipse-ee4j'],
+      'eclipse':['eclipse', 'eclipse-ee4j'],
+      'lf':     ['cncf', 'openjs-foundation', 'nodejs'],
+      'cncf':   ['cncf', 'kubernetes', 'etcd-io', 'prometheus', 'containerd'],
+      'psf':    ['psf', 'python', 'pallets', 'django'],
+      'python': ['psf', 'python', 'pallets', 'django'],
+      'openjs': ['openjs-foundation', 'nodejs'],
+      'rust':   ['rust-lang'],
+    };
     const KNOWN_COMMERCIAL_OWNERS = new Set([
       'google', 'googleapis', 'googlecloudplatform', 'microsoft', 'azure',
       'facebook', 'meta', 'aws', 'amazonwebservices', 'oracle',
@@ -78220,6 +78244,22 @@
     const activeTiers = new Set(TIERS.map(t => t.key));
     const activeHealth = new Set(HEALTH_BUCKETS.map(b => b.key));
     const activeEcosystems = new Set(ECOSYSTEMS);
+    let searchQuery = '';
+
+    function searchMatches(p) {
+      if (!searchQuery) return true;
+      const q = searchQuery;
+      // alias expansion (exact key match, case-insensitive) — covers ASF, EF, CNCF…
+      if (OWNER_ALIASES[q]) {
+        const owners = OWNER_ALIASES[q];
+        if (owners.includes((p.owner || '').toLowerCase())) return true;
+      }
+      // substring matches across owner + package name fields
+      if ((p.owner      || '').toLowerCase().includes(q)) return true;
+      if ((p.owner_name || '').toLowerCase().includes(q)) return true;
+      if ((p.name       || '').toLowerCase().includes(q)) return true;
+      return false;
+    }
 
     function bucketFor(h) {
       const b = HEALTH_BUCKETS.find(b => b.test(h));
@@ -78231,7 +78271,8 @@
         const p = c.userData.project;
         const passesFilter = activeTiers.has(p.support_tier)
                           && activeHealth.has(bucketFor(p.health))
-                          && activeEcosystems.has(p.ecosystem);
+                          && activeEcosystems.has(p.ecosystem)
+                          && searchMatches(p);
         const visible = selectedMesh ? (c === selectedMesh) : passesFilter;
         c.material.transparent = !visible;
         c.material.opacity = visible ? 1.0 : GHOST_OPACITY;
@@ -78332,6 +78373,12 @@
     HEALTH_BUCKETS.forEach(b => makePill(b.label, healthCounts[b.key] || 0, b.hue, activeHealth, b.key));
     addDivider();
     ECOSYSTEMS.forEach(e => makePill(e, ecosystemCounts[e] || 0, undefined, activeEcosystems, e));
+
+    // Search (owner aliases + substring on owner / owner_name / package name)
+    document.getElementById('search').addEventListener('input', (e) => {
+      searchQuery = e.target.value.trim().toLowerCase();
+      applyVisibility();
+    });
 
     // --- Hover tooltip ---
     const raycaster = new THREE.Raycaster();
