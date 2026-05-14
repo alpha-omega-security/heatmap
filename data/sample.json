@@ -1,0 +1,43 @@
+{
+  "generated_at": "2026-05-14",
+  "source": "fake",
+  "notes": "Hand-crafted strawman dataset. Numbers are illustrative, not real.",
+  "projects": [
+    { "name": "log4j-core",       "ecosystem": "java",       "support_tier": "foundation",      "support_org": "Apache Software Foundation", "health": 0.55, "usage": 88, "complexity_kb": 18000 },
+    { "name": "spring-boot",      "ecosystem": "java",       "support_tier": "commercial",      "support_org": "Broadcom",                   "health": 0.85, "usage": 92, "complexity_kb": 45000 },
+    { "name": "jackson-databind", "ecosystem": "java",       "support_tier": "sole_maintainer", "support_org": null,                         "health": 0.65, "usage": 85, "complexity_kb": 12000 },
+    { "name": "guava",            "ecosystem": "java",       "support_tier": "commercial",      "support_org": "Google",                     "health": 0.80, "usage": 90, "complexity_kb": 22000 },
+    { "name": "junit5",           "ecosystem": "java",       "support_tier": "foundation",      "support_org": "JUnit Team",                 "health": 0.85, "usage": 80, "complexity_kb":  8000 },
+
+    { "name": "requests",         "ecosystem": "python",     "support_tier": "foundation",      "support_org": "Python Software Foundation", "health": 0.75, "usage": 98, "complexity_kb":  5000 },
+    { "name": "numpy",            "ecosystem": "python",     "support_tier": "foundation",      "support_org": "NumFOCUS",                   "health": 0.90, "usage": 95, "complexity_kb": 85000 },
+    { "name": "django",           "ecosystem": "python",     "support_tier": "foundation",      "support_org": "Django Software Foundation", "health": 0.85, "usage": 82, "complexity_kb": 68000 },
+    { "name": "flask",            "ecosystem": "python",     "support_tier": "foundation",      "support_org": "Pallets Projects",           "health": 0.70, "usage": 78, "complexity_kb":  4000 },
+    { "name": "urllib3",          "ecosystem": "python",     "support_tier": "sole_maintainer", "support_org": null,                         "health": 0.65, "usage": 92, "complexity_kb":  8000 },
+
+    { "name": "lodash",           "ecosystem": "javascript", "support_tier": "sole_maintainer", "support_org": null,                         "health": 0.45, "usage": 95, "complexity_kb":  2500 },
+    { "name": "react",            "ecosystem": "javascript", "support_tier": "commercial",      "support_org": "Meta",                       "health": 0.95, "usage": 93, "complexity_kb": 120000 },
+    { "name": "express",          "ecosystem": "javascript", "support_tier": "foundation",      "support_org": "OpenJS Foundation",          "health": 0.50, "usage": 88, "complexity_kb":  3500 },
+    { "name": "axios",            "ecosystem": "javascript", "support_tier": "foundation",      "support_org": "OpenJS Foundation",          "health": 0.70, "usage": 85, "complexity_kb":  4500 },
+    { "name": "webpack",          "ecosystem": "javascript", "support_tier": "foundation",      "support_org": "OpenJS Foundation",          "health": 0.75, "usage": 80, "complexity_kb": 35000 },
+    { "name": "jquery",           "ecosystem": "javascript", "support_tier": "foundation",      "support_org": "OpenJS Foundation",          "health": 0.35, "usage": 70, "complexity_kb": 18000 },
+
+    { "name": "kubernetes",       "ecosystem": "go",         "support_tier": "foundation",      "support_org": "CNCF",                       "health": 0.95, "usage": 85, "complexity_kb": 420000 },
+    { "name": "etcd",             "ecosystem": "go",         "support_tier": "foundation",      "support_org": "CNCF",                       "health": 0.85, "usage": 72, "complexity_kb": 85000 },
+    { "name": "prometheus",       "ecosystem": "go",         "support_tier": "foundation",      "support_org": "CNCF",                       "health": 0.90, "usage": 80, "complexity_kb": 120000 },
+    { "name": "gin",              "ecosystem": "go",         "support_tier": "sole_maintainer", "support_org": null,                         "health": 0.75, "usage": 78, "complexity_kb":  4500 },
+    { "name": "grpc-go",          "ecosystem": "go",         "support_tier": "commercial",      "support_org": "Google",                     "health": 0.85, "usage": 82, "complexity_kb": 55000 },
+
+    { "name": "rails",            "ecosystem": "ruby",       "support_tier": "foundation",      "support_org": "Rails Foundation",           "health": 0.85, "usage": 88, "complexity_kb": 95000 },
+    { "name": "sinatra",          "ecosystem": "ruby",       "support_tier": "sole_maintainer", "support_org": null,                         "health": 0.55, "usage": 65, "complexity_kb":  3500 },
+    { "name": "devise",           "ecosystem": "ruby",       "support_tier": "sole_maintainer", "support_org": null,                         "health": 0.60, "usage": 72, "complexity_kb":  8000 },
+    { "name": "sidekiq",          "ecosystem": "ruby",       "support_tier": "commercial",      "support_org": "Contributed Systems",        "health": 0.85, "usage": 78, "complexity_kb": 12000 },
+    { "name": "nokogiri",         "ecosystem": "ruby",       "support_tier": "sole_maintainer", "support_org": null,                         "health": 0.70, "usage": 80, "complexity_kb": 22000 },
+
+    { "name": "left-pad",         "ecosystem": "javascript", "support_tier": "bernies",         "support_org": null,                         "health": 0.10, "usage": 45, "complexity_kb":   200 },
+    { "name": "request",          "ecosystem": "javascript", "support_tier": "bernies",         "support_org": null,                         "health": 0.15, "usage": 70, "complexity_kb":  8500 },
+    { "name": "moment",           "ecosystem": "javascript", "support_tier": "bernies",         "support_org": null,                         "health": 0.30, "usage": 75, "complexity_kb": 18000 },
+    { "name": "node-uuid",        "ecosystem": "javascript", "support_tier": "bernies",         "support_org": null,                         "health": 0.20, "usage": 55, "complexity_kb":   600 },
+    { "name": "core-js",          "ecosystem": "javascript", "support_tier": "bernies",         "support_org": null,                         "health": 0.25, "usage": 92, "complexity_kb": 35000 }
+  ]
+}

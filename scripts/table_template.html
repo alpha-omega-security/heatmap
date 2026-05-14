@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>OSS Project Risk Table</title>
+  <style>
+    body { margin: 0; background: #0f172a; color: #e2e8f0;
+           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 13px; line-height: 1.4; }
+    header { padding: 12px 16px; background: #1e293b; border-bottom: 1px solid #334155;
+             display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+    header h1 { margin: 0; font-size: 16px; }
+    header a { color: #93c5fd; text-decoration: none; }
+    header a:hover { text-decoration: underline; }
+    .nav { display: flex; gap: 12px; }
+    .filters { padding: 10px 16px; background: #0f172a; border-bottom: 1px solid #334155;
+               display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .filter-group { display: flex; gap: 4px; }
+    .pill {
+      padding: 4px 10px; border-radius: 12px; font-size: 11px; cursor: pointer;
+      border: 1px solid #475569; background: transparent; color: #94a3b8;
+      font-family: inherit; user-select: none;
+    }
+    .pill.active { background: #475569; color: #f8fafc; border-color: #64748b; }
+    .pill:hover { border-color: #94a3b8; }
+    .pill .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+                 margin-right: 4px; vertical-align: middle; }
+    .pill .count { opacity: 0.7; margin-left: 4px; font-size: 10px; }
+    .filter-divider { width: 1px; background: #475569; height: 18px; margin: 0 4px; }
+    input[type="search"] {
+      padding: 4px 8px; border: 1px solid #475569; border-radius: 4px;
+      background: #1e293b; color: #e2e8f0; font-size: 12px; font-family: inherit;
+      width: 200px; margin-left: auto;
+    }
+    .info { padding: 6px 16px; color: #94a3b8; font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; }
+    th { background: #1e293b; padding: 8px 10px; text-align: left; cursor: pointer;
+         user-select: none; position: sticky; top: 0; z-index: 1;
+         border-bottom: 2px solid #334155; font-weight: 600; white-space: nowrap; }
+    th:hover { background: #334155; }
+    th.sorted-asc::after  { content: ' ↑'; color: #93c5fd; }
+    th.sorted-desc::after { content: ' ↓'; color: #93c5fd; }
+    th.numeric, td.numeric { text-align: right; font-variant-numeric: tabular-nums; }
+    td { padding: 6px 10px; border-bottom: 1px solid #1e293b; vertical-align: middle; }
+    tr:hover td { background: #1e293b; }
+    .name a { color: #e2e8f0; text-decoration: none; font-weight: 600; }
+    .name a:hover { color: #93c5fd; }
+    .badge {
+      display: inline-block; padding: 1px 6px; border-radius: 3px;
+      font-size: 11px; background: #334155; color: #cbd5e1;
+    }
+    .badge.tier-commercial      { background: #1e40af; color: #dbeafe; }
+    .badge.tier-foundation      { background: #6b21a8; color: #f3e8ff; }
+    .badge.tier-sole_maintainer { background: #b45309; color: #fef3c7; }
+    .badge.tier-bernies         { background: #475569; color: #f8fafc; }
+    .bar {
+      display: inline-block; width: 60px; height: 6px;
+      background: #1e293b; border-radius: 2px; vertical-align: middle;
+      margin-right: 6px; overflow: hidden;
+    }
+    .bar > span { display: block; height: 100%; }
+    .ghost { opacity: 0.3; }
+    .nul { color: #475569; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>OSS Project Risk Table</h1>
+    <div class="nav">
+      <a href="index.html">City View ↗</a>
+    </div>
+  </header>
+
+  <div class="filters">
+    <div class="filter-group" id="tiers"></div>
+    <div class="filter-divider"></div>
+    <div class="filter-group" id="healths"></div>
+    <div class="filter-divider"></div>
+    <div class="filter-group" id="ecosystems"></div>
+    <input type="search" id="search" placeholder="search name / owner…">
+  </div>
+
+  <div class="info" id="count"></div>
+
+  <table id="grid">
+    <thead>
+      <tr id="head"></tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <script>
+    const DATA = /*DATA_JSON*/;
+
+    // --- Derivation: keep in sync with scripts/template.html ---
+    const KNOWN_FOUNDATION_OWNERS = new Set([
+      'apache', 'eclipse-ee4j', 'eclipse', 'kubernetes', 'etcd-io', 'prometheus',
+      'cncf', 'openjs-foundation', 'nodejs', 'psf', 'pallets', 'django', 'numfocus',
+      'rust-lang', 'rails', 'ruby',
+    ]);
+    const KNOWN_COMMERCIAL_OWNERS = new Set([
+      'google', 'googleapis', 'googlecloudplatform', 'microsoft', 'azure',
+      'facebook', 'meta', 'aws', 'amazonwebservices', 'oracle',
+      'redhat', 'hashicorp', 'vercel', 'mongodb', 'elastic', 'snyk', 'datadog',
+    ]);
+    function clamp01(x) { return Math.max(0, Math.min(1, x)); }
+    function yearsSince(iso) {
+      if (!iso) return null;
+      return (Date.now() - new Date(iso).getTime()) / (365 * 24 * 60 * 60 * 1000);
+    }
+    function deriveTier(p) {
+      if (p.archived || p.fork) return 'bernies';
+      const owner = (p.owner || '').toLowerCase();
+      if (KNOWN_COMMERCIAL_OWNERS.has(owner)) return 'commercial';
+      if (KNOWN_FOUNDATION_OWNERS.has(owner)) return 'foundation';
+      if (p.owner_kind === 'organization') return 'foundation';
+      return 'sole_maintainer';
+    }
+    function deriveHealth(p) {
+      if (p.archived) return 0.05;
+      const yrs = yearsSince(p.latest_release_at);
+      const recency = (yrs == null) ? 0.3 : clamp01(1 - yrs / 3);
+      const bus     = (p.dds != null) ? clamp01(p.dds) : 0.5;
+      const maint   = clamp01((p.active_maintainer_count || 0) / 3);
+      const gov     = clamp01((p.governance_files_count || 0) / 3);
+      return (recency + bus + maint + gov) / 4;
+    }
+    function deriveSubstitutability(p) {
+      const sizeScore   = clamp01(Math.log10((p.repo_size || 0) + 1) / 6);
+      const ageYrs      = yearsSince(p.first_release_at);
+      const ageScore    = (ageYrs == null) ? 0 : clamp01(ageYrs / 15);
+      const contribScore = clamp01(Math.log10((p.total_committers || 0) + 1) / 4);
+      return 0.55 * sizeScore + 0.40 * ageScore + 0.05 * contribScore;
+    }
+
+    // Drop ecosystems with too few packages to be statistically interesting.
+    // City view keeps them; table is for analytic comparisons across ecosystems
+    // and small samples make rankings meaningless.
+    const MIN_ECOSYSTEM_SIZE = 100;
+    const ecoSizes = {};
+    DATA.projects.forEach(p => { ecoSizes[p.ecosystem] = (ecoSizes[p.ecosystem] || 0) + 1; });
+    const droppedEcoNames = Object.entries(ecoSizes)
+      .filter(([, n]) => n < MIN_ECOSYSTEM_SIZE)
+      .map(([k]) => k)
+      .sort();
+    const droppedPkgCount = DATA.projects.length - DATA.projects.filter(p => (ecoSizes[p.ecosystem] || 0) >= MIN_ECOSYSTEM_SIZE).length;
+
+    // Pre-process
+    const projects = DATA.projects
+      .filter(p => (ecoSizes[p.ecosystem] || 0) >= MIN_ECOSYSTEM_SIZE)
+      .map(p => Object.assign({}, p));
+    projects.forEach(p => {
+      p.support_tier      = deriveTier(p);
+      p.health            = deriveHealth(p);
+      p.substitutability  = deriveSubstitutability(p);
+      // composite risk: critical AND unhealthy = worst.
+      p.risk              = (p.criticality || 0) * (1 - (p.health || 0));
+    });
+
+    // --- Filter setup (pill state) ---
+    const TIERS = [
+      { key: 'commercial',      label: '\u{1F3E2} Commercial' },
+      { key: 'foundation',      label: '\u{1F3DB}\u{FE0F} Foundation' },
+      { key: 'sole_maintainer', label: '\u{1F9D1}\u{200D}\u{1F4BB} Individual' },
+      { key: 'bernies',         label: '\u{1F60E} Bernies' },
+    ];
+    const HEALTH_BUCKETS = [
+      { key: 'good', label: 'Good', hue: 120, test: h => h >= 0.67 },
+      { key: 'mid',  label: 'Mid',  hue: 60,  test: h => h >= 0.34 && h < 0.67 },
+      { key: 'bad',  label: 'Bad',  hue: 0,   test: h => h < 0.34 },
+    ];
+    function bucketFor(h) {
+      const b = HEALTH_BUCKETS.find(b => b.test(h));
+      return b ? b.key : 'mid';
+    }
+    const ECOSYSTEMS = [...new Set(projects.map(p => p.ecosystem))]
+      .sort((a, b) => projects.filter(p => p.ecosystem === b).length
+                    - projects.filter(p => p.ecosystem === a).length);
+
+    const activeTiers      = new Set(TIERS.map(t => t.key));
+    const activeHealth     = new Set(HEALTH_BUCKETS.map(b => b.key));
+    const activeEcosystems = new Set(ECOSYSTEMS);
+    let searchTerm = '';
+
+    // Counts
+    const tCount = {}, hCount = {}, eCount = {};
+    projects.forEach(p => {
+      tCount[p.support_tier] = (tCount[p.support_tier] || 0) + 1;
+      hCount[bucketFor(p.health)] = (hCount[bucketFor(p.health)] || 0) + 1;
+      eCount[p.ecosystem] = (eCount[p.ecosystem] || 0) + 1;
+    });
+
+    function makePill(parent, label, count, dotHue, set, key) {
+      const btn = document.createElement('button');
+      btn.className = 'pill active';
+      let html = '';
+      if (dotHue !== undefined) html += '<span class="dot" style="background:hsl(' + dotHue + ',75%,48%)"></span>';
+      html += label + '<span class="count">' + count + '</span>';
+      btn.innerHTML = html;
+      btn.addEventListener('click', () => {
+        if (set.has(key)) { set.delete(key); btn.classList.remove('active'); }
+        else              { set.add(key);    btn.classList.add('active'); }
+        render();
+      });
+      parent.appendChild(btn);
+    }
+    TIERS.forEach(t => makePill(document.getElementById('tiers'), t.label, tCount[t.key] || 0, undefined, activeTiers, t.key));
+    HEALTH_BUCKETS.forEach(b => makePill(document.getElementById('healths'), b.label, hCount[b.key] || 0, b.hue, activeHealth, b.key));
+    ECOSYSTEMS.forEach(e => makePill(document.getElementById('ecosystems'), e, eCount[e] || 0, undefined, activeEcosystems, e));
+
+    document.getElementById('search').addEventListener('input', (e) => {
+      searchTerm = e.target.value.trim().toLowerCase();
+      render();
+    });
+
+    // --- Table columns ---
+    const COLS = [
+      { key: 'name',                     label: 'Name',         numeric: false, fmt: (v, p) => `<span class="name">${p.repository_url ? `<a href="${p.repository_url}" target="_blank">${esc(v)}</a>` : esc(v)}</span>` },
+      { key: 'ecosystem',                label: 'Eco',          numeric: false, fmt: v => `<span class="badge">${esc(v)}</span>` },
+      { key: 'owner',                    label: 'Owner',        numeric: false, fmt: v => v ? esc(v) : nullCell() },
+      { key: 'support_tier',             label: 'Tier',         numeric: false, fmt: v => `<span class="badge tier-${v}">${esc(v)}</span>` },
+      { key: 'health',                   label: 'Health',       numeric: true,  fmt: v => bar(v, 120) },
+      { key: 'criticality',              label: 'Criticality',  numeric: true,  fmt: v => bar(v, 0) },
+      { key: 'risk',                     label: 'Risk',         numeric: true,  fmt: v => bar(v, 0) },
+      { key: 'dependent_repos_count',    label: 'Dep repos',    numeric: true,  fmt: v => fmtInt(v) },
+      { key: 'downloads',                label: 'Downloads',    numeric: true,  fmt: v => fmtInt(v) },
+      { key: 'advisory_count',           label: 'Adv',          numeric: true,  fmt: v => v ? fmtInt(v) : nullCell() },
+      { key: 'max_cvss_score',           label: 'Max CVSS',     numeric: true,  fmt: v => v != null ? v.toFixed(1) : nullCell() },
+      { key: 'dds',                      label: 'DDS',          numeric: true,  fmt: v => v != null ? v.toFixed(2) : nullCell() },
+      { key: 'substitutability',         label: 'Substitut.',   numeric: true,  fmt: v => bar(v, 30) },
+      { key: 'latest_release_at',        label: 'Last release', numeric: false, fmt: v => v ? v.slice(0, 10) : nullCell() },
+    ];
+
+    function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    function nullCell() { return '<span class="nul">—</span>'; }
+    function fmtInt(n) { return n == null ? nullCell() : n.toLocaleString(); }
+    function bar(v, hue) {
+      if (v == null) return nullCell();
+      const pct = Math.round(clamp01(v) * 100);
+      const color = `hsl(${hue}, 75%, 48%)`;
+      return `<span class="bar"><span style="width:${pct}%; background:${color};"></span></span><span style="font-variant-numeric: tabular-nums;">${v.toFixed(2)}</span>`;
+    }
+
+    // Build header
+    const headEl = document.getElementById('head');
+    let sortKey = 'risk';
+    let sortDir = -1;
+    COLS.forEach(c => {
+      const th = document.createElement('th');
+      th.textContent = c.label;
+      if (c.numeric) th.classList.add('numeric');
+      th.addEventListener('click', () => {
+        if (sortKey === c.key) sortDir = -sortDir;
+        else { sortKey = c.key; sortDir = c.numeric ? -1 : 1; }
+        render();
+      });
+      th.dataset.key = c.key;
+      headEl.appendChild(th);
+    });
+
+    function compare(a, b) {
+      if (a == null && b == null) return 0;
+      if (a == null) return 1;
+      if (b == null) return -1;
+      if (typeof a === 'number' && typeof b === 'number') return a - b;
+      return String(a).localeCompare(String(b));
+    }
+
+    function render() {
+      const filtered = projects.filter(p => {
+        if (!activeTiers.has(p.support_tier)) return false;
+        if (!activeHealth.has(bucketFor(p.health))) return false;
+        if (!activeEcosystems.has(p.ecosystem)) return false;
+        if (searchTerm) {
+          const hay = ((p.name || '') + ' ' + (p.owner || '')).toLowerCase();
+          if (!hay.includes(searchTerm)) return false;
+        }
+        return true;
+      });
+      filtered.sort((a, b) => sortDir * compare(a[sortKey], b[sortKey]));
+
+      // Header sort indicators
+      [...headEl.children].forEach(th => {
+        th.classList.remove('sorted-asc', 'sorted-desc');
+        if (th.dataset.key === sortKey) th.classList.add(sortDir > 0 ? 'sorted-asc' : 'sorted-desc');
+      });
+
+      // Rows
+      const rowsEl = document.getElementById('rows');
+      rowsEl.innerHTML = '';
+      const frag = document.createDocumentFragment();
+      filtered.forEach(p => {
+        const tr = document.createElement('tr');
+        COLS.forEach(c => {
+          const td = document.createElement('td');
+          if (c.numeric) td.classList.add('numeric');
+          td.innerHTML = c.fmt(p[c.key], p);
+          tr.appendChild(td);
+        });
+        frag.appendChild(tr);
+      });
+      rowsEl.appendChild(frag);
+
+      document.getElementById('count').textContent =
+        `${filtered.length} of ${projects.length} packages — sorted by ${sortKey} ${sortDir > 0 ? '↑' : '↓'}`;
+    }
+
+    render();
+  </script>
+</body>
+</html>

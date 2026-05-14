@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>OSS Project Heatmap</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #0f172a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #e2e8f0; }
+    .panel {
+      position: absolute; background: rgba(15, 23, 42, 0.85);
+      padding: 12px 16px; border-radius: 8px; line-height: 1.4; font-size: 13px;
+      border: 1px solid rgba(51, 65, 85, 0.6);
+    }
+    #left-stack { position: absolute; top: 12px; left: 12px; display: flex; flex-direction: column; gap: 12px; max-width: 260px; }
+    #info  { position: static; }
+    #filters { position: static; }
+    #legend { bottom: 12px; left: 12px; font-size: 12px; line-height: 1.5; padding: 10px 14px; }
+    #detail {
+      top: 12px; right: 12px; min-width: 240px; max-width: 320px;
+      display: none;
+    }
+    #detail h2 { margin: 0 0 8px 0; font-size: 15px; }
+    #detail dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0; font-size: 12px; }
+    #detail dt { color: #94a3b8; }
+    #detail dd { margin: 0; }
+    #detail .hint { margin-top: 10px; font-size: 11px; color: #64748b; }
+    #info h1 { margin: 0 0 6px 0; font-size: 14px; }
+    #info dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 6px 0 0 0; font-size: 12px; }
+    #info dt { color: #94a3b8; }
+    #info dd { margin: 0; }
+    #tooltip {
+      position: absolute; pointer-events: none; z-index: 10;
+      background: rgba(15, 23, 42, 0.95); padding: 6px 10px; border-radius: 4px;
+      font-size: 12px; display: none; line-height: 1.4;
+      border: 1px solid #334155;
+    }
+    .swatch { display: inline-block; width: 14px; height: 14px; vertical-align: middle; margin-right: 4px; border-radius: 2px; }
+    #filters { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+    .filter-pill {
+      padding: 6px 12px; border-radius: 14px; font-size: 12px; cursor: pointer;
+      border: 1px solid #475569; background: transparent; color: #94a3b8;
+      font-family: inherit; transition: background 0.15s, color 0.15s, border-color 0.15s;
+      user-select: none; text-align: left;
+    }
+    .filter-pill.active { background: #475569; color: #f8fafc; border-color: #64748b; }
+    .filter-pill:hover { border-color: #94a3b8; }
+    .filter-pill .count { opacity: 0.7; margin-left: 6px; font-size: 11px; float: right; }
+    .filter-pill .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+    .filter-divider { height: 1px; background: #475569; margin: 4px 0; }
+  </style>
+</head>
+<body>
+  <div id="left-stack">
+    <div id="info" class="panel">
+      <h1>OSS Project Heatmap &middot; <a href="table.html" style="color:#93c5fd; text-decoration:none; font-size:12px; font-weight:normal;">Table View ↗</a></h1>
+      <div>Drag to rotate &middot; scroll to zoom &middot; right-drag to pan &middot; <strong>click a cylinder to focus</strong></div>
+      <dl>
+        <dt>Color</dt><dd>health (recency + dds + maintainers + governance)</dd>
+        <dt>Height</dt><dd>criticality (1 − rankings.average / 100)</dd>
+        <dt>Footprint</dt><dd>substitutability (size + age + contributors)</dd>
+      </dl>
+    </div>
+    <div id="filters" class="panel"></div>
+  </div>
+  <div id="detail" class="panel"></div>
+  <div id="tooltip"></div>
+
+  <script src="vendor/three.min.js"></script>
+  <script src="vendor/OrbitControls.js"></script>
+  <script>
+    const DATA = /*DATA_JSON*/;
+
+    // --- Tunable scaling functions (edit these to adjust visualization) ---
+    // Heights normalized across the loaded set so a top-N slice (e.g. top-300
+    // by criticality, all clustered in 0.7-1.0) still has dramatic variation.
+    // Power < 1 flattens the top, making mid-rank buildings still feel tall.
+    const HEIGHT_MAX = 80;
+    const HEIGHT_MIN = 1.0;
+    const HEIGHT_POWER = 2.5;   // >1 = convex: mid-rank short, top outliers tower
+    let HEIGHT_SCALE;  // bound after we know the dataset's criticality range
+    const RADIUS_SCALE = sub => 1.0 + clamp01(sub) * 0.5;  // substitutability (0..1) -> half-side 1.0..1.5; intentionally narrow so footprints read uniform and tall outliers dominate the eye
+    const HEALTH_COLOR = h => new THREE.Color('hsl(' + Math.round(h * 120) + ', 75%, 48%)');
+    const SUB_RADIAL_STEP = 4.5;   // within-cluster spiral spacing
+    const JITTER = 1.5;            // base organic noise on each position
+    const EDGE_BLEED = 10.0;       // extra jitter for outer-ring projects; bleeds districts into neighbors
+    const CENTER_JITTER_FRAC = 0.5; // random drift on cluster centers, as fraction of cluster radius
+    const CLUSTER_GAP = -2;        // gap between neighboring districts (negative = overlap)
+    const ROW_ASPECT = 1.3;        // target width/height ratio for the overall city
+    const LABEL_TOP_N = 20;        // show name labels for top-N projects by criticality
+    const GHOST_OPACITY = 0.12;    // opacity for unselected cylinders when one is focused
+
+    // --- Owner -> tier mapping (edit to taste; compared lowercased) ---
+    const KNOWN_FOUNDATION_OWNERS = new Set([
+      'apache', 'eclipse-ee4j', 'eclipse', 'kubernetes', 'etcd-io', 'prometheus',
+      'cncf', 'openjs-foundation', 'nodejs', 'psf', 'pallets', 'django', 'numfocus',
+      'rust-lang', 'rails', 'ruby',
+    ]);
+    const KNOWN_COMMERCIAL_OWNERS = new Set([
+      'google', 'googleapis', 'googlecloudplatform', 'microsoft', 'azure',
+      'facebook', 'meta', 'aws', 'amazonwebservices', 'oracle',
+      'redhat', 'hashicorp', 'vercel', 'mongodb', 'elastic', 'snyk', 'datadog',
+    ]);
+
+    // D1 — Tier of supported library (per data.md)
+    function deriveTier(p) {
+      if (p.archived || p.fork) return 'bernies';
+      const owner = (p.owner || '').toLowerCase();
+      if (KNOWN_COMMERCIAL_OWNERS.has(owner)) return 'commercial';
+      if (KNOWN_FOUNDATION_OWNERS.has(owner)) return 'foundation';
+      // owner_kind=organization but not in our curated lists -> bucket with foundation
+      if (p.owner_kind === 'organization') return 'foundation';
+      return 'sole_maintainer';
+    }
+
+    // D2 — Health (per data.md): synthetic blend over fields with broad coverage.
+    // Scorecard intentionally excluded (only ~42% have it).
+    function clamp01(x) { return Math.max(0, Math.min(1, x)); }
+    function yearsSince(iso) {
+      if (!iso) return null;
+      return (Date.now() - new Date(iso).getTime()) / (365 * 24 * 60 * 60 * 1000);
+    }
+    function deriveHealth(p) {
+      if (p.archived) return 0.05;
+      const yrs = yearsSince(p.latest_release_at);
+      const recency = (yrs == null) ? 0.3 : clamp01(1 - yrs / 3);
+      const bus     = (p.dds != null) ? clamp01(p.dds) : 0.5;
+      const maint   = clamp01((p.active_maintainer_count || 0) / 3);
+      const gov     = clamp01((p.governance_files_count || 0) / 3);
+      return (recency + bus + maint + gov) / 4;
+    }
+
+    // D4 — Substitutability proxy (per data.md): bigger / older / more-maintained = harder to swap.
+    function deriveSubstitutability(p) {
+      const sizeScore   = clamp01(Math.log10((p.repo_size || 0) + 1) / 6);             // KB; 1 GB -> 1.0
+      const ageYrs      = yearsSince(p.first_release_at);
+      const ageScore    = (ageYrs == null) ? 0 : clamp01(ageYrs / 15);
+      const contribScore = clamp01(Math.log10((p.total_committers || 0) + 1) / 4);
+      return 0.55 * sizeScore + 0.40 * ageScore + 0.05 * contribScore;
+    }
+
+    // --- Pre-process: clone, derive tier+health, sort by (pre-computed)
+    //     criticality desc so the most-critical projects sit at the city center.
+    //     average_ranking and criticality come from the data layer (SQL extractor
+    //     for real data, gen_fake.py for fake data) — both compute per-ecosystem. ---
+    const projects = DATA.projects.map(p => Object.assign({}, p));
+    projects.forEach(p => {
+      p.support_tier = deriveTier(p);
+      p.health = deriveHealth(p);
+      p.substitutability = deriveSubstitutability(p);
+    });
+    projects.sort((a, b) => b.criticality - a.criticality);
+
+    // Bind HEIGHT_SCALE now that we have the criticality range of the loaded set.
+    {
+      const crits = projects.map(p => p.criticality);
+      const minC = Math.min(...crits);
+      const maxC = Math.max(...crits);
+      const span = Math.max(maxC - minC, 1e-6);
+      HEIGHT_SCALE = c => {
+        const norm = (c - minC) / span;
+        return HEIGHT_MIN + Math.pow(norm, HEIGHT_POWER) * (HEIGHT_MAX - HEIGHT_MIN);
+      };
+    }
+
+    const PHI = Math.PI * (3 - Math.sqrt(5));   // golden angle
+
+    // Seeded RNG so the layout is stable across reloads.
+    function makeRng(seed) {
+      let s = seed >>> 0;
+      return () => {
+        s = (s * 1664525 + 1013904223) >>> 0;
+        return s / 4294967296;
+      };
+    }
+    const rng = makeRng(0xC1A1);
+
+    // --- District layout: ecosystem + owner clustering ---
+    // 1. Group projects by ecosystem. Within each, order by owner (most-critical
+    //    owner first) then by criticality, so same-owner projects sit adjacent
+    //    in the sub-spiral and the most-critical owner anchors the district core.
+    // 2. Pack ecosystem clusters with simple shelf packing (sort by size desc,
+    //    fill row-by-row until the row exceeds the target width).
+    // 3. Each project's world position = its district center + sub-spiral offset.
+    const byEco = new Map();
+    projects.forEach(p => {
+      const eco = p.ecosystem || '_unknown';
+      if (!byEco.has(eco)) byEco.set(eco, []);
+      byEco.get(eco).push(p);
+    });
+    byEco.forEach(arr => {
+      const ownerWeight = new Map();
+      arr.forEach(p => {
+        const o = (p.owner || '').toLowerCase();
+        if ((ownerWeight.get(o) || 0) < p.criticality) ownerWeight.set(o, p.criticality);
+      });
+      arr.sort((a, b) => {
+        const oa = (a.owner || '').toLowerCase();
+        const ob = (b.owner || '').toLowerCase();
+        if (oa !== ob) return (ownerWeight.get(ob) || 0) - (ownerWeight.get(oa) || 0);
+        return b.criticality - a.criticality;
+      });
+    });
+
+    const clusters = [...byEco.entries()].map(([name, arr]) => ({
+      name, projects: arr,
+      radius: SUB_RADIAL_STEP * Math.sqrt(arr.length) + 2,
+    }));
+    // Shuffle (Fisher-Yates with seeded rng) so the meta-layout isn't visibly
+    // sorted by district size. Costs a bit of packing efficiency, fine.
+    for (let i = clusters.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [clusters[i], clusters[j]] = [clusters[j], clusters[i]];
+    }
+
+    const totalArea = clusters.reduce((s, c) => s + Math.PI * c.radius * c.radius, 0);
+    const targetWidth = Math.sqrt(totalArea) * ROW_ASPECT;
+
+    let rowX = 0, rowZ = 0, rowMaxH = 0;
+    clusters.forEach(c => {
+      const slot = c.radius * 2 + CLUSTER_GAP;
+      if (rowX > 0 && rowX + slot > targetWidth) {
+        rowZ += rowMaxH;
+        rowX = 0;
+        rowMaxH = 0;
+      }
+      c.cx = rowX + c.radius;
+      c.cz = rowZ + c.radius;
+      rowX += slot;
+      rowMaxH = Math.max(rowMaxH, slot);
+    });
+    // Re-center the packed grid at origin and drift each district off its grid
+    // slot — the bigger the district the larger the absolute drift, but small
+    // districts get to wander more relative to their size.
+    const maxXEdge = Math.max(...clusters.map(c => c.cx + c.radius));
+    const maxZEdge = Math.max(...clusters.map(c => c.cz + c.radius));
+    clusters.forEach(c => {
+      c.cx -= maxXEdge / 2;
+      c.cz -= maxZEdge / 2;
+      c.cx += (rng() - 0.5) * 2 * c.radius * CENTER_JITTER_FRAC;
+      c.cz += (rng() - 0.5) * 2 * c.radius * CENTER_JITTER_FRAC;
+    });
+
+    // Precompute per-project world positions (sub-spiral within district).
+    // Outer-ring projects get extra jitter (rank fraction * EDGE_BLEED) so the
+    // district edges genuinely bleed into neighbors instead of forming hard tiles.
+    const positionByProject = new Map();
+    clusters.forEach(c => {
+      const n = c.projects.length;
+      c.projects.forEach((p, i) => {
+        const r = SUB_RADIAL_STEP * Math.sqrt(i);
+        const theta = i * PHI;
+        const localJitter = JITTER + (i / Math.max(n - 1, 1)) * EDGE_BLEED;
+        const lx = r * Math.cos(theta) + (rng() - 0.5) * 2 * localJitter;
+        const lz = r * Math.sin(theta) + (rng() - 0.5) * 2 * localJitter;
+        positionByProject.set(p, [c.cx + lx, c.cz + lz]);
+      });
+    });
+
+    // City "radius" for camera/ground sizing — half of the longer dimension plus margin.
+    const cityRadius = Math.max(maxXEdge, maxZEdge) / 2 + 12;
+
+    // --- Scene ---
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0f172a);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000);
+    const camDist = cityRadius * 1.9;
+    camera.position.set(camDist, cityRadius * 1.0, camDist);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 5, 0);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+
+    // --- Lighting ---
+    scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+    const dir = new THREE.DirectionalLight(0xffffff, 0.85);
+    dir.position.set(cityRadius, cityRadius * 1.5, cityRadius * 0.5);
+    scene.add(dir);
+    scene.add(new THREE.HemisphereLight(0xeaeaea, 0x1e293b, 0.3));
+
+    // --- Ground (no grid helper: layout isn't gridded anymore) ---
+    const groundSize = cityRadius * 5;
+    const ground = new THREE.Mesh(
+      new THREE.CircleGeometry(groundSize / 2, 64),
+      new THREE.MeshLambertMaterial({ color: 0x1e293b })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    scene.add(ground);
+
+    // --- Label sprite factory ---
+    function makeLabel(text) {
+      const canvas = document.createElement('canvas');
+      const w = 512, h = 96;
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+      ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = 'rgba(100, 116, 139, 0.7)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(1, 1, w - 2, h - 2);
+      ctx.font = 'bold 52px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.fillStyle = '#e2e8f0';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, w / 2, h / 2);
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.minFilter = THREE.LinearFilter;
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: tex, transparent: true, depthTest: false, depthWrite: false,
+      }));
+      sprite.scale.set(8, 1.5, 1);
+      sprite.renderOrder = 999;
+      return sprite;
+    }
+
+    // --- Cylinders ---
+    const cylinders = [];
+    const labelsByMesh = new Map();
+    const topByCriticality = new Set(
+      projects.slice(0, LABEL_TOP_N).map(p => p.name)
+    );
+
+    projects.forEach(p => {
+      const radius = RADIUS_SCALE(p.substitutability);
+      const height = HEIGHT_SCALE(p.criticality);
+      const geom = new THREE.BoxGeometry(radius * 2, height, radius * 2);
+      const mat = new THREE.MeshLambertMaterial({ color: HEALTH_COLOR(p.health) });
+      const mesh = new THREE.Mesh(geom, mat);
+      const [x, z] = positionByProject.get(p);
+      mesh.position.set(x, height / 2, z);
+      mesh.userData = { project: p, height: height };
+      scene.add(mesh);
+      cylinders.push(mesh);
+
+      const label = makeLabel(p.name);
+      label.position.set(mesh.position.x, height + 1.5, mesh.position.z);
+      label.visible = topByCriticality.has(p.name);
+      scene.add(label);
+      labelsByMesh.set(mesh, label);
+    });
+
+    // --- Tier + health filters + selection (combined visibility) ---
+    let selectedMesh = null;
+    const detailPanel = document.getElementById('detail');
+    const TIERS = [
+      { key: 'commercial',      label: '\u{1F3E2} Commercial' },
+      { key: 'foundation',      label: '\u{1F3DB}\u{FE0F} Foundation' },
+      { key: 'sole_maintainer', label: '\u{1F9D1}\u{200D}\u{1F4BB} Individual' },
+      { key: 'bernies',         label: '\u{1F60E} Bernies' },
+    ];
+    const HEALTH_BUCKETS = [
+      { key: 'good', label: 'Good', hue: 120, test: h => h >= 0.67 },
+      { key: 'mid',  label: 'Mid',  hue: 60,  test: h => h >= 0.34 && h < 0.67 },
+      { key: 'bad',  label: 'Bad',  hue: 0,   test: h => h < 0.34 },
+    ];
+    // Ecosystems are derived from DATA so this works for both fake and real datasets.
+    const ECOSYSTEMS = (() => {
+      const counts = new Map();
+      DATA.projects.forEach(p => counts.set(p.ecosystem, (counts.get(p.ecosystem) || 0) + 1));
+      return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([key]) => key);
+    })();
+    const activeTiers = new Set(TIERS.map(t => t.key));
+    const activeHealth = new Set(HEALTH_BUCKETS.map(b => b.key));
+    const activeEcosystems = new Set(ECOSYSTEMS);
+
+    function bucketFor(h) {
+      const b = HEALTH_BUCKETS.find(b => b.test(h));
+      return b ? b.key : 'mid';
+    }
+
+    function applyVisibility() {
+      cylinders.forEach(c => {
+        const p = c.userData.project;
+        const passesFilter = activeTiers.has(p.support_tier)
+                          && activeHealth.has(bucketFor(p.health))
+                          && activeEcosystems.has(p.ecosystem);
+        const visible = selectedMesh ? (c === selectedMesh) : passesFilter;
+        c.material.transparent = !visible;
+        c.material.opacity = visible ? 1.0 : GHOST_OPACITY;
+        c.material.depthWrite = visible;
+        const lbl = labelsByMesh.get(c);
+        if (selectedMesh) {
+          lbl.visible = (c === selectedMesh);
+        } else {
+          lbl.visible = passesFilter && topByCriticality.has(p.name);
+        }
+      });
+    }
+
+    function selectMesh(mesh) {
+      if (selectedMesh === mesh) {  // toggle off
+        clearSelection();
+        return;
+      }
+      selectedMesh = mesh;
+      const p = mesh.userData.project;
+      const fmt = n => (n == null ? '—' : n.toLocaleString());
+      const repoLink = p.repository_url
+        ? '<a href="' + p.repository_url + '" target="_blank" style="color:#93c5fd;">repo ↗</a>'
+        : '—';
+      detailPanel.innerHTML =
+        '<h2>' + p.name + '</h2>' +
+        '<dl>' +
+        '<dt>ecosystem</dt><dd>' + p.ecosystem + '</dd>' +
+        '<dt>owner</dt><dd>' + (p.owner || '—') + ' &middot; ' + repoLink + '</dd>' +
+        '<dt>tier</dt><dd>' + p.support_tier + '</dd>' +
+        '<dt>health</dt><dd>' + p.health.toFixed(2) + '</dd>' +
+        '<dt>avg rank</dt><dd>' + p.average_ranking.toFixed(1) + ' (criticality ' + (p.criticality * 100).toFixed(0) + '%)</dd>' +
+        '<dt>dep repos</dt><dd>' + fmt(p.dependent_repos_count) + '</dd>' +
+        '<dt>dep pkgs</dt><dd>' + fmt(p.dependent_packages_count) + '</dd>' +
+        '<dt>downloads</dt><dd>' + fmt(p.downloads) + (p.downloads_period ? ' (' + p.downloads_period + ')' : '') + '</dd>' +
+        '<dt>forks</dt><dd>' + fmt(p.forks_count) + '</dd>' +
+        '<dt>open issues</dt><dd>' + fmt(p.open_issues_count) + '</dd>' +
+        '<dt>versions</dt><dd>' + fmt(p.versions_count) + ' (latest ' + (p.latest_version || '?') + ')</dd>' +
+        '<dt>last release</dt><dd>' + (p.latest_release_at ? p.latest_release_at.slice(0, 10) : '—') + '</dd>' +
+        '<dt>license</dt><dd>' + (p.licenses || '—') + '</dd>' +
+        '<dt>advisories</dt><dd>' + p.advisory_count + (p.max_cvss_score ? ' (max CVSS ' + p.max_cvss_score + ')' : '') + '</dd>' +
+        (p.archived ? '<dt>flags</dt><dd>archived</dd>' : '') +
+        (p.fork ? '<dt>flags</dt><dd>fork</dd>' : '') +
+        '</dl>' +
+        '<div class="hint">click again or click empty space to clear</div>';
+      detailPanel.style.display = 'block';
+      applyVisibility();
+    }
+
+    function clearSelection() {
+      selectedMesh = null;
+      detailPanel.style.display = 'none';
+      applyVisibility();
+    }
+
+    // --- Filter pills (tiers + health) ---
+    const tierCounts = {};
+    const healthCounts = {};
+    const ecosystemCounts = {};
+    // Iterate the derived `projects` array — DATA.projects doesn't have
+    // support_tier or health yet (those are derived per-project in JS).
+    projects.forEach(p => {
+      tierCounts[p.support_tier] = (tierCounts[p.support_tier] || 0) + 1;
+      ecosystemCounts[p.ecosystem] = (ecosystemCounts[p.ecosystem] || 0) + 1;
+      const bk = bucketFor(p.health);
+      healthCounts[bk] = (healthCounts[bk] || 0) + 1;
+    });
+
+    const filtersEl = document.getElementById('filters');
+    function makePill(label, count, dotHue, isActiveSet, key) {
+      const btn = document.createElement('button');
+      btn.className = 'filter-pill active';
+      let html = '';
+      if (dotHue !== undefined) {
+        html += '<span class="dot" style="background:hsl(' + dotHue + ',75%,48%)"></span>';
+      }
+      html += label + '<span class="count">' + count + '</span>';
+      btn.innerHTML = html;
+      btn.addEventListener('click', () => {
+        if (isActiveSet.has(key)) {
+          isActiveSet.delete(key);
+          btn.classList.remove('active');
+        } else {
+          isActiveSet.add(key);
+          btn.classList.add('active');
+        }
+        applyVisibility();
+      });
+      filtersEl.appendChild(btn);
+    }
+    function addDivider() {
+      const d = document.createElement('div');
+      d.className = 'filter-divider';
+      filtersEl.appendChild(d);
+    }
+    TIERS.forEach(t => makePill(t.label, tierCounts[t.key] || 0, undefined, activeTiers, t.key));
+    addDivider();
+    HEALTH_BUCKETS.forEach(b => makePill(b.label, healthCounts[b.key] || 0, b.hue, activeHealth, b.key));
+    addDivider();
+    ECOSYSTEMS.forEach(e => makePill(e, ecosystemCounts[e] || 0, undefined, activeEcosystems, e));
+
+    // --- Hover tooltip ---
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    const tooltip = document.getElementById('tooltip');
+    renderer.domElement.addEventListener('mousemove', (e) => {
+      mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+      raycaster.setFromCamera(mouse, camera);
+      const hits = raycaster.intersectObjects(cylinders);
+      if (hits.length > 0) {
+        const p = hits[0].object.userData.project;
+        tooltip.innerHTML =
+          '<strong>' + p.name + '</strong><br>' +
+          p.ecosystem + ' &middot; ' + (p.owner || 'no owner') + ' &middot; ' + p.support_tier + '<br>' +
+          'avg rank ' + p.average_ranking.toFixed(0) +
+          ' &middot; health ' + p.health.toFixed(2) +
+          (p.advisory_count ? ' &middot; ' + p.advisory_count + ' advisories' : '');
+        tooltip.style.display = 'block';
+        tooltip.style.left = (e.clientX + 14) + 'px';
+        tooltip.style.top = (e.clientY + 14) + 'px';
+        renderer.domElement.style.cursor = 'pointer';
+      } else {
+        tooltip.style.display = 'none';
+        renderer.domElement.style.cursor = 'default';
+      }
+    });
+
+    // --- Click handling (distinguish click from drag) ---
+    let pointerDown = null;
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+      pointerDown = { x: e.clientX, y: e.clientY };
+    });
+    renderer.domElement.addEventListener('pointerup', (e) => {
+      if (!pointerDown) return;
+      const dx = e.clientX - pointerDown.x;
+      const dy = e.clientY - pointerDown.y;
+      pointerDown = null;
+      if (Math.hypot(dx, dy) > 4) return;  // it was a drag, not a click
+      mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+      raycaster.setFromCamera(mouse, camera);
+      const hits = raycaster.intersectObjects(cylinders);
+      if (hits.length > 0) {
+        selectMesh(hits[0].object);
+      } else {
+        clearSelection();
+      }
+    });
+
+
+    // --- Resize ---
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // --- Animate ---
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+  </script>
+</body>
+</html>

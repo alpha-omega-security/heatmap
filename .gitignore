@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
+
+# Downloaded data — fetch with scripts/fetch_critical.py
+data/critical-packages.db
+data/critical-packages.db.gz
+*.db-shm
+*.db-wal
+
+# Live API fetch — scripts/fetch_critical_full.py
+data/cache/
+data/critical-full.json
