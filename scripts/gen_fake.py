@@ -43,15 +43,31 @@ DOWNLOAD_ECOSYSTEMS = {"npm", "pypi", "rubygems", "cargo", "nuget"}
 # Owner tier hints. Names match real GitHub orgs so the JS-side derivation
 # (KNOWN_FOUNDATION_OWNERS / KNOWN_COMMERCIAL_OWNERS in the template) maps them.
 FOUNDATION_OWNERS = [
-    "apache", "eclipse-ee4j", "eclipse", "kubernetes", "etcd-io",
-    "prometheus", "cncf", "openjs-foundation", "nodejs", "psf",
-    "pallets", "django", "numfocus", "rust-lang", "rails", "ruby",
+    "apache", "eclipse", "eclipse-ee4j",
+    "cncf", "kubernetes", "etcd-io", "prometheus", "open-telemetry",
+    "openjs-foundation", "nodejs", "babel", "jestjs",
+    "psf", "pallets", "django", "pypa", "pytest-dev", "aio-libs",
+    "numfocus", "jupyter", "matplotlib",
+    "rust-lang", "tokio-rs", "rustcrypto",
+    "rails", "ruby",
+    "haskell",
+    "thephpleague", "php-http", "symfony",
+    "definitelytyped",
+    "r-lib",
+    "voxpupuli",
+    "clj-commons",
 ]
 COMMERCIAL_OWNERS = [
-    "google", "googleapis", "googlecloudplatform", "microsoft", "azure",
-    "facebook", "meta", "aws", "amazonwebservices",
-    "oracle", "redhat", "hashicorp", "vercel", "mongodb",
-    "elastic", "snyk", "datadog",
+    "google", "googleapis", "googlecloudplatform", "grpc", "dart-lang", "firebase", "protocolbuffers",
+    "microsoft", "azure", "azuread", "dotnet", "npm", "octokit",
+    "facebook", "meta",
+    "aws", "amazonwebservices", "smithy-lang",
+    "apple",
+    "oracle", "redhat", "hashicorp", "vercel", "mongodb", "elastic",
+    "snyk", "datadog", "broadcom", "spring-projects", "spring-cloud",
+    "rstudio", "tidyverse",
+    "chef", "puppetlabs",
+    "laravel", "spatie", "metosin", "knplabs",
 ]
 INDIVIDUAL_OWNERS = [
     "jdoe", "msmith", "kbrown", "rwilson", "alex123", "lchen", "mtanaka",
