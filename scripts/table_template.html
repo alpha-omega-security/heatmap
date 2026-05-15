@@ -275,10 +275,14 @@
     });
 
     function compare(a, b) {
+      // Numeric comparisons: treat null as 0 (so nulls don't sort as "max").
+      // String comparisons: keep nulls at the end of the list either way.
+      if (typeof a === 'number' || typeof b === 'number') {
+        return (a == null ? 0 : a) - (b == null ? 0 : b);
+      }
       if (a == null && b == null) return 0;
       if (a == null) return 1;
       if (b == null) return -1;
-      if (typeof a === 'number' && typeof b === 'number') return a - b;
       return String(a).localeCompare(String(b));
     }
 
@@ -325,10 +329,17 @@
 
       const countEl = document.getElementById('count');
       const dir = sortDir > 0 ? '↑' : '↓';
+      const isFiltered = filtered.length < projects.length;
       if (filtered.length > visible.length) {
-        countEl.innerHTML = `showing top <strong>${visible.length}</strong> of ${filtered.length} matching · ${projects.length} total · sorted by ${sortKey} ${dir} · <em>refine filter to see more</em>`;
+        const matchedPart = isFiltered
+          ? `top <strong>${visible.length}</strong> of ${filtered.length} matching (${projects.length} total)`
+          : `top <strong>${visible.length}</strong> of ${projects.length}`;
+        countEl.innerHTML = `showing ${matchedPart} · sorted by ${sortKey} ${dir} · <em>refine filter to see more</em>`;
       } else {
-        countEl.textContent = `${filtered.length} of ${projects.length} packages — sorted by ${sortKey} ${dir}`;
+        const totalPart = isFiltered
+          ? `${filtered.length} of ${projects.length} packages`
+          : `${projects.length} packages`;
+        countEl.textContent = `${totalPart} — sorted by ${sortKey} ${dir}`;
       }
     }
 
