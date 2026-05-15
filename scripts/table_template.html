@@ -282,6 +282,11 @@
       return String(a).localeCompare(String(b));
     }
 
+    // Cap the number of rows mounted to the DOM. Filter + sort still operate
+    // on the full set; the cap just limits what's rendered for legibility +
+    // perf. If the user wants to see more, they refine the filter.
+    const MAX_VISIBLE_ROWS = 500;
+
     function render() {
       const filtered = projects.filter(p => {
         if (!activeTiers.has(p.support_tier)) return false;
@@ -294,6 +299,7 @@
         return true;
       });
       filtered.sort((a, b) => sortDir * compare(a[sortKey], b[sortKey]));
+      const visible = filtered.slice(0, MAX_VISIBLE_ROWS);
 
       // Header sort indicators
       [...headEl.children].forEach(th => {
@@ -305,7 +311,7 @@
       const rowsEl = document.getElementById('rows');
       rowsEl.innerHTML = '';
       const frag = document.createDocumentFragment();
-      filtered.forEach(p => {
+      visible.forEach(p => {
         const tr = document.createElement('tr');
         COLS.forEach(c => {
           const td = document.createElement('td');
@@ -317,8 +323,13 @@
       });
       rowsEl.appendChild(frag);
 
-      document.getElementById('count').textContent =
-        `${filtered.length} of ${projects.length} packages — sorted by ${sortKey} ${sortDir > 0 ? '↑' : '↓'}`;
+      const countEl = document.getElementById('count');
+      const dir = sortDir > 0 ? '↑' : '↓';
+      if (filtered.length > visible.length) {
+        countEl.innerHTML = `showing top <strong>${visible.length}</strong> of ${filtered.length} matching · ${projects.length} total · sorted by ${sortKey} ${dir} · <em>refine filter to see more</em>`;
+      } else {
+        countEl.textContent = `${filtered.length} of ${projects.length} packages — sorted by ${sortKey} ${dir}`;
+      }
     }
 
     render();

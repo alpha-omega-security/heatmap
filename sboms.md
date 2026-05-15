@@ -2,6 +2,8 @@
 
 Notes for anyone with access to private SBOMs — your own organization's, or a set of SBOMs from multiple orgs you analyze (a federation, an industry group, a consultancy's clients) — on how to plug them into this pipeline to surface real, environment-specific risk.
 
+> If you want consortium-level signal without member orgs sharing their raw SBOMs, see [`ppca.md`](./ppca.md) — privacy-preserving aggregation built on top of this pipeline.
+
 This codebase already produces a single `risk = criticality × (1 − health)` score per package using **global** signals from packages.ecosyste.ms. SBOM data lets you replace the global criticality piece with environment-specific criticality (D7), unlock D5/D6 entirely (vulnerability-weighted exposure), and — most usefully — surface packages whose internal importance *outsizes* their global popularity. Those are the hidden risks.
 
 ## What you need from the SBOMs

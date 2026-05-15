@@ -78410,10 +78410,16 @@
     });
 
     // --- Hover tooltip ---
+    // Raycasting against thousands of meshes per mousemove event is the main
+    // perf hot path at scale. requestAnimationFrame-throttle: at most one
+    // raycast per frame, regardless of how many mousemove events fire.
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
     const tooltip = document.getElementById('tooltip');
-    renderer.domElement.addEventListener('mousemove', (e) => {
+    let pendingMouseEvent = null;
+    let mouseRafScheduled = false;
+
+    function processHover(e) {
       mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
       mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
       raycaster.setFromCamera(mouse, camera);
@@ -78437,6 +78443,16 @@
         tooltip.style.display = 'none';
         renderer.domElement.style.cursor = 'default';
       }
+    }
+
+    renderer.domElement.addEventListener('mousemove', (e) => {
+      pendingMouseEvent = e;
+      if (mouseRafScheduled) return;
+      mouseRafScheduled = true;
+      requestAnimationFrame(() => {
+        mouseRafScheduled = false;
+        if (pendingMouseEvent) processHover(pendingMouseEvent);
+      });
     });
 
     // --- Click handling (distinguish click from drag) ---
