@@ -80,6 +80,8 @@ Three.js r128 + OrbitControls are vendored in `docs/vendor/`, so the page works 
 
 Sortable table with the same data, filters, and JS-side derivations. Cross-linked from the city view's title bar. Default sort: **risk** = `criticality × (1 − health)` — the "show me the worst 20 in npm" answer in one click. Additionally drops any ecosystem with fewer than `MIN_ECOSYSTEM_SIZE = 100` packages because sparse ecosystems make table rankings noisy; the city view keeps them all.
 
+**Upload SBOM…** in the filter bar takes a CycloneDX or SPDX JSON file and narrows the table to packages that appear in it. Everything happens client-side — the file is read with `FileReader`, never uploaded anywhere. Each component's purl is parsed with the vendored [packageurl-js](https://github.com/package-url/packageurl-js) and matched against the dataset on `(type, namespace, name)` — version, qualifiers and subpath are ignored, and PyPI names are PEP 503 normalized. The status chip shows `filename: X of Y packages in dataset (N bad purls)`; the gap is your match-quality signal (see [`sboms.md`](./sboms.md)). The SBOM filter ANDs with the tier/health/ecosystem pills, so "my dependencies that are bernies" or "my dependencies sorted by risk" is one upload plus one click. Try it with `data/sample-sbom.cdx.json`.
+
 ## Repo layout
 
 ```
@@ -88,6 +90,7 @@ heatmap/
 │   ├── sample.json              # hand-curated 31-project example (legacy schema)
 │   ├── generated.json           # output of gen_fake.py (schema-aligned)
 │   ├── critical.json            # output of extract_critical_full.py — what the viz consumes
+│   ├── sample-sbom.cdx.json     # demo CycloneDX SBOM for the table view's Upload SBOM button
 │   ├── critical-full.json       # raw rich records from the live API (gitignored, ~170 MB)
 │   ├── critical-packages.db     # legacy slim-DB snapshot (gitignored, ~40 MB)
 │   └── cache/critical-pages/    # paginated API responses, cached for offline reuse (gitignored)
@@ -105,7 +108,8 @@ heatmap/
 │   ├── table.html               # sortable table (generated, committed)
 │   └── vendor/
 │       ├── three.min.js         # three.js r128, vendored
-│       └── OrbitControls.js
+│       ├── OrbitControls.js
+│       └── packageurl.js        # packageurl-js v1.2.1, vendored (window.PackageURL)
 ├── README.md
 ├── data.md                      # data-source mapping per working-group dimension (D1-D7)
 └── AGENTS.md                    # notes for AI agents working on this repo

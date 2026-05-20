@@ -60,7 +60,23 @@
     .bar > span { display: block; height: 100%; }
     .ghost { opacity: 0.3; }
     .nul { color: #475569; }
+    .sbom-btn {
+      padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer;
+      border: 1px solid #475569; background: #1e293b; color: #e2e8f0;
+      font-family: inherit;
+    }
+    .sbom-btn:hover { border-color: #94a3b8; }
+    .sbom-status {
+      font-size: 11px; color: #94a3b8; display: none;
+      padding: 4px 8px; border: 1px solid #475569; border-radius: 4px;
+      background: #1e293b;
+    }
+    .sbom-status.active { display: inline-flex; align-items: center; gap: 8px; }
+    .sbom-status strong { color: #e2e8f0; }
+    .sbom-status .clear { cursor: pointer; color: #93c5fd; }
+    .sbom-status .clear:hover { text-decoration: underline; }
   </style>
+  <script src="vendor/packageurl.js"></script>
 </head>
 <body>
   <header>
@@ -76,6 +92,13 @@
     <div class="filter-group" id="healths"></div>
     <div class="filter-divider"></div>
     <div class="filter-group" id="ecosystems"></div>
+    <div class="filter-divider"></div>
+    <input type="file" id="sbom-file" accept=".json,.cdx,.spdx,application/json" style="display:none">
+    <button class="sbom-btn" id="sbom-btn" title="Filter to packages in a CycloneDX or SPDX JSON SBOM">Upload SBOM…</button>
+    <span class="sbom-status" id="sbom-status">
+      <span id="sbom-summary"></span>
+      <span class="clear" id="sbom-clear">clear</span>
+    </span>
     <input type="search" id="search" placeholder="search name / owner…">
   </div>
 
@@ -197,6 +220,7 @@
     const activeHealth     = new Set(HEALTH_BUCKETS.map(b => b.key));
     const activeEcosystems = new Set(ECOSYSTEMS);
     let searchTerm = '';
+    let sbomFilter = null;  // Set of purlKey() strings, or null when no SBOM loaded
 
     // Counts
     const tCount = {}, hCount = {}, eCount = {};
@@ -226,6 +250,89 @@
 
     document.getElementById('search').addEventListener('input', (e) => {
       searchTerm = e.target.value.trim().toLowerCase();
+      render();
+    });
+
+    // --- SBOM upload filter ---
+    // Match on (type, namespace, name) only — SBOM purls carry @version and
+    // often ?qualifiers that the dataset purls don't. PackageURL.fromString()
+    // handles percent-decoding so pkg:npm/%40babel/core and pkg:npm/@babel/core
+    // both yield namespace="@babel".
+    function purlKey(purl) {
+      try {
+        const p = PackageURL.fromString(purl);
+        let name = p.name;
+        if (p.type === 'pypi') name = name.replace(/[._]/g, '-');
+        return (p.type + '/' + (p.namespace || '') + '/' + name).toLowerCase();
+      } catch (e) {
+        return null;
+      }
+    }
+    const projectPurlKeys = new Set();
+    projects.forEach(p => {
+      p._purlKey = purlKey(p.purl);
+      if (p._purlKey) projectPurlKeys.add(p._purlKey);
+    });
+
+    function extractPurls(text) {
+      const out = [];
+      let doc;
+      try { doc = JSON.parse(text); } catch (e) { throw new Error('Not valid JSON'); }
+      if (doc && doc.bomFormat === 'CycloneDX' && Array.isArray(doc.components)) {
+        doc.components.forEach(c => { if (c && c.purl) out.push(c.purl); });
+      } else if (doc && typeof doc.spdxVersion === 'string' && Array.isArray(doc.packages)) {
+        doc.packages.forEach(pkg => {
+          (pkg.externalRefs || []).forEach(ref => {
+            if (ref && ref.referenceType === 'purl' && ref.referenceLocator) out.push(ref.referenceLocator);
+          });
+        });
+      } else {
+        throw new Error('Unrecognized SBOM — expected CycloneDX or SPDX JSON');
+      }
+      return out;
+    }
+
+    function applySbom(filename, text) {
+      const summaryEl = document.getElementById('sbom-summary');
+      const statusEl = document.getElementById('sbom-status');
+      let purls;
+      try {
+        purls = extractPurls(text);
+      } catch (e) {
+        sbomFilter = null;
+        statusEl.classList.add('active');
+        summaryEl.textContent = filename + ': ' + e.message;
+        render();
+        return;
+      }
+      const keys = new Set();
+      let unparseable = 0;
+      purls.forEach(s => {
+        const k = purlKey(s);
+        if (k) keys.add(k); else unparseable++;
+      });
+      sbomFilter = keys;
+      let matched = 0;
+      keys.forEach(k => { if (projectPurlKeys.has(k)) matched++; });
+      let msg = '<strong>' + esc(filename) + '</strong>: ' + matched + ' of ' + keys.size + ' packages in dataset';
+      if (unparseable) msg += ' (' + unparseable + ' bad purl' + (unparseable === 1 ? '' : 's') + ')';
+      summaryEl.innerHTML = msg;
+      statusEl.classList.add('active');
+      render();
+    }
+
+    document.getElementById('sbom-btn').addEventListener('click', () => {
+      document.getElementById('sbom-file').click();
+    });
+    document.getElementById('sbom-file').addEventListener('change', (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      f.text().then(t => applySbom(f.name, t));
+      e.target.value = '';
+    });
+    document.getElementById('sbom-clear').addEventListener('click', () => {
+      sbomFilter = null;
+      document.getElementById('sbom-status').classList.remove('active');
       render();
     });
 
@@ -293,6 +400,7 @@
 
     function render() {
       const filtered = projects.filter(p => {
+        if (sbomFilter && !sbomFilter.has(p._purlKey)) return false;
         if (!activeTiers.has(p.support_tier)) return false;
         if (!activeHealth.has(bucketFor(p.health))) return false;
         if (!activeEcosystems.has(p.ecosystem)) return false;
