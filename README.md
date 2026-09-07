@@ -190,3 +190,7 @@ See [`data.md`](./data.md) for the full per-dimension data inventory and scoring
 | (not yet) | D5 — actual blast radius (needs SBOM-weighted exposure) |
 | (not yet) | D6 — vulnerability concentration across the orgs you analyze (needs SBOMs) |
 | (not yet) | D7 — library concentration across the orgs you analyze (needs SBOMs) |
+
+## License
+
+MIT. See [LICENSE](LICENSE). Copyright (c) 2026 Alpha-Omega.
